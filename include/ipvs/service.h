@@ -56,6 +56,7 @@ struct dp_vs_service {
     uint8_t             proto;      /* TCP/UDP/... */
     union inet_addr     addr;       /* virtual IP address */
     uint16_t            port;
+    uint32_t            vx_vni_vip;        /* VNI (24) + Reserved (8). */
     uint32_t            fwmark;
     struct dp_vs_match  *match;
 
@@ -92,6 +93,7 @@ struct dp_vs_service_conf {
     uint16_t            protocol;
     union inet_addr     addr;       /* virtual ip address */
     uint16_t            port;
+    uint32_t            vx_vni_vip;        /* VNI (24) + Reserved (8). */
     uint32_t            fwmark;     /* firwall mark of service */
     struct dp_vs_match  match;
 
@@ -109,6 +111,7 @@ struct dp_vs_service_entry {
     uint16_t            proto;
     uint32_t            addr;
     uint16_t            port;
+    uint32_t            vx_vni_vip;        /* VNI (24) + Reserved (8). */
     uint32_t            fwmark;
 
     char                sched_name[DP_VS_SCHEDNAME_MAXLEN];
@@ -163,7 +166,8 @@ void __dp_vs_bind_svc(struct dp_vs_dest *dest, struct dp_vs_service *svc);
 void __dp_vs_unbind_svc(struct dp_vs_dest *dest);
 
 struct dp_vs_service *dp_vs_lookup_vip(int af, uint16_t protocol,
-                                    const union inet_addr *vaddr);
+                                    const union inet_addr *vaddr,
+                                    uint32_t vx_vni_vip);
 
 static inline void dp_vs_service_put(struct dp_vs_service *svc)
 {
@@ -171,7 +175,7 @@ static inline void dp_vs_service_put(struct dp_vs_service *svc)
 }
 
 struct dp_vs_service *__dp_vs_service_get(int af, uint16_t protocol,
-                       const union inet_addr *vaddr, uint16_t vport);
+                       const union inet_addr *vaddr, uint16_t vport, uint32_t vx_vni_vip);
 
 struct dp_vs_service *__dp_vs_svc_fwm_get(int af, uint32_t fwmark);
 
@@ -192,6 +196,7 @@ struct dp_vs_service_user{
     uint16_t    proto;
     uint32_t    addr;
     uint16_t    port;
+    uint32_t    vx_vni_vip;        /* VNI (24) + Reserved (8). */
     uint32_t    fwmark;
     
     char        sched_name[DP_VS_SCHEDNAME_MAXLEN];

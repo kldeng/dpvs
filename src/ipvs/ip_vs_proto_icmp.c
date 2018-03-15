@@ -141,6 +141,9 @@ static struct dp_vs_conn *icmp_conn_lookup(struct dp_vs_proto *proto,
     __be16 sport, dport; /* dummy ports */
     uint8_t type;
     assert(proto && iph && mbuf);
+    struct dp_vs_vxlan_info *vxi = get_priv(mbuf);
+    uint32_t vx_vni_vip = vxi->vx_vni_vip ? vxi->vx_vni_vip : 0;
+    uint32_t vx_vni_rs = vxi->vx_vni_rs ? vxi->vx_vni_rs : 0;
 
     ich = mbuf_header_pointer(mbuf, iph->len, sizeof(_icmph), &_icmph);
     if (unlikely(!ich))
@@ -156,7 +159,7 @@ static struct dp_vs_conn *icmp_conn_lookup(struct dp_vs_proto *proto,
         return NULL;
     }
 
-    return dp_vs_conn_get(iph->af, iph->proto, &iph->saddr, &iph->daddr,
+    return dp_vs_conn_get(iph->af, iph->proto, &iph->saddr, &iph->daddr, vx_vni_vip, vx_vni_rs,
                           sport, dport, direct, reverse);
 }
 

@@ -19,6 +19,7 @@
 #include <netinet/in.h>
 #include "inet.h"
 #include "ipv4.h"
+#include "vxlan.h"
 #include "ipvs/service.h"
 #include "ipvs/dest.h"
 #include "ipvs/sched.h"
@@ -104,17 +105,20 @@ static int dp_vs_svc_unhash(struct dp_vs_service *svc)
 }
 
 struct dp_vs_service *__dp_vs_service_get(int af, uint16_t protocol, 
-                                          const union inet_addr *vaddr, uint16_t vport)
+                                          const union inet_addr *vaddr, uint16_t vport, uint32_t vx_vni_vip)
 {
     unsigned hash;
     struct dp_vs_service *svc;
 
     hash = dp_vs_svc_hashkey(af, protocol, vaddr);
     list_for_each_entry(svc, &dp_vs_svc_table[hash], s_list){
+    RTE_LOG(DEBUG, SERVICE, "%s: vx_vni_vip = %u, svc->vx_vni_vip=%u\n", __func__, vx_vni_vip, svc->vx_vni_vip);
         if ((svc->af == af)
             && inet_addr_equal(af, &svc->addr, vaddr)
             && (svc->port == vport)
-            && (svc->proto == protocol)) {
+            && (svc->proto == protocol)
+            && (svc->vx_vni_vip == vx_vni_vip)
+) {
                 rte_atomic32_inc(&svc->usecnt);
                 return svc;
             }
@@ -283,13 +287,20 @@ struct dp_vs_service *dp_vs_service_lookup(int af, uint16_t protocol,
                                         const struct dp_vs_match *match)
 {
     struct dp_vs_service *svc = NULL;
+    struct dp_vs_vxlan_info *vxi;
+    uint32_t vx_vni_vip = 0;
+
+    if (mbuf) {
+        vxi = get_priv(mbuf);
+        vx_vni_vip = vxi->vx_vni_vip;
+    }
 
     rte_rwlock_read_lock(&__dp_vs_svc_lock);
 
     if (fwmark && (svc = __dp_vs_svc_fwm_get(af, fwmark)))
         goto out;
 
-    if ((svc = __dp_vs_service_get(af, protocol, vaddr, vport)))
+    if ((svc = __dp_vs_service_get(af, protocol, vaddr, vport, vx_vni_vip)))
         goto out;
 
     if (match && !is_empty_match(match))
@@ -306,7 +317,8 @@ out:
 
 
 struct dp_vs_service *dp_vs_lookup_vip(int af, uint16_t protocol,
-                       const union inet_addr *vaddr)
+                       const union inet_addr *vaddr, 
+            uint32_t vx_vni_vip)
 {
     struct dp_vs_service *svc;
     unsigned hash;
@@ -317,7 +329,8 @@ struct dp_vs_service *dp_vs_lookup_vip(int af, uint16_t protocol,
     list_for_each_entry(svc, &dp_vs_svc_table[hash], s_list) {
         if ((svc->af == af)
             && inet_addr_equal(af, &svc->addr, vaddr)
-            && (svc->proto == protocol)) {
+            && (svc->proto == protocol)
+        && svc->vx_vni_vip == vx_vni_vip) {
             /* HIT */
             rte_rwlock_read_unlock(&__dp_vs_svc_lock);
             return svc;
@@ -381,6 +394,7 @@ int dp_vs_add_service(struct dp_vs_service_conf *u,
     svc->proto = u->protocol;
     svc->addr = u->addr;
     svc->port = u->port;
+    svc->vx_vni_vip = u->vx_vni_vip;
     svc->fwmark = u->fwmark;
     svc->flags = u->flags;
     svc->timeout = u->timeout;
@@ -586,6 +600,7 @@ dp_vs_copy_service(struct dp_vs_service_entry *dst, struct dp_vs_service *src)
     dst->proto = src->proto;
     dst->addr = src->addr.in.s_addr;
     dst->port = src->port;
+    dst->vx_vni_vip = src->vx_vni_vip;
     dst->fwmark = src->fwmark;
     snprintf(dst->sched_name, sizeof(dst->sched_name),
              "%s", src->scheduler->name);
@@ -773,6 +788,7 @@ static int dp_vs_copy_usvc_compat(struct dp_vs_service_conf *conf,
     conf->protocol = user->proto;
     conf->addr.in.s_addr = user->addr;
     conf->port = user->port;
+    conf->vx_vni_vip = user->vx_vni_vip;
     conf->fwmark = user->fwmark;
 
     /* Deep copy of sched_name is not needed here */
@@ -794,6 +810,10 @@ static void dp_vs_copy_udest_compat(struct dp_vs_dest_conf *udest,
 {
     udest->addr.in.s_addr = udest_compat->addr;
     udest->port = udest_compat->port;
+    udest->hip.in.s_addr = udest_compat->hip;
+    udest->vx_vni_rs = udest_compat->vx_vni_rs;
+    ether_addr_copy(&udest_compat->mac, &udest->mac);
+
     udest->fwdmode = udest_compat->conn_flags;//make sure fwdmode and conn_flags are the same
     udest->conn_flags = udest_compat->conn_flags; 
     udest->weight = udest_compat->weight;
@@ -824,6 +844,7 @@ static int dp_vs_set_svc(sockoptid_t opt, const void *user, size_t len)
     struct dp_vs_dest_user *udest_compat;
     struct dp_vs_dest_conf udest;
     struct in_addr *vip;
+
 
     if (opt == DPVS_SO_SET_GRATARP){
         vip = (struct in_addr *)user;
@@ -856,7 +877,7 @@ static int dp_vs_set_svc(sockoptid_t opt, const void *user, size_t len)
 
     if (usvc.addr.in.s_addr || usvc.port)
         svc = __dp_vs_service_get(usvc.af, usvc.protocol, 
-                                  &usvc.addr, usvc.port);
+                                  &usvc.addr, usvc.port, usvc.vx_vni_vip);
     else if (usvc.fwmark)
         svc = __dp_vs_svc_fwm_get(usvc.af, usvc.fwmark);
     else if (!is_empty_match(&usvc.match))
@@ -964,7 +985,7 @@ static int dp_vs_get_svc(sockoptid_t opt, const void *user, size_t len, void **o
                     svc = __dp_vs_svc_fwm_get(AF_INET, entry->fwmark);
                 else if (entry->addr || entry->port)
                     svc = __dp_vs_service_get(AF_INET, entry->proto,
-                                              &addr, entry->port);
+                                              &addr, entry->port, entry->vx_vni_vip);
                 else {
                     struct dp_vs_match match;
 
@@ -1014,7 +1035,7 @@ static int dp_vs_get_svc(sockoptid_t opt, const void *user, size_t len, void **o
                     svc = __dp_vs_svc_fwm_get(AF_INET, get->fwmark);
                 else if (addr.in.s_addr || get->port)
                     svc = __dp_vs_service_get(AF_INET, get->proto, &addr,
-                                              get->port);
+                                              get->port, get->vx_vni_vip);
                 else {
                     struct dp_vs_match match;
 

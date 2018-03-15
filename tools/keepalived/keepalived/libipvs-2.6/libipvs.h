@@ -1,9 +1,9 @@
 /*
- * libipvs.h:	header file for the library ipvs
+ * libipvs.h:   header file for the library ipvs
  *
- * Version:	$Id: libipvs.h,v 1.7 2003/06/08 09:31:39 wensong Exp $
+ * Version: $Id: libipvs.h,v 1.7 2003/06/08 09:31:39 wensong Exp $
  *
- * Authors:	Wensong Zhang <wensong@linuxvirtualserver.org>
+ * Authors: Wensong Zhang <wensong@linuxvirtualserver.org>
  *
  */
 
@@ -12,43 +12,47 @@
 
 #include "ip_vs.h"
 
-#define OPT_NONE		0x000000
-#define OPT_NUMERIC		0x000001
-#define OPT_CONNECTION		0x000002
-#define OPT_SERVICE		0x000004
-#define OPT_SCHEDULER		0x000008
-#define OPT_PERSISTENT		0x000010
-#define OPT_NETMASK		0x000020
-#define OPT_SERVER		0x000040
-#define OPT_FORWARD		0x000080
-#define OPT_WEIGHT		0x000100
-#define OPT_UTHRESHOLD		0x000200
-#define OPT_LTHRESHOLD		0x000400
-#define OPT_MCAST		0x000800
-#define OPT_TIMEOUT		0x001000
-#define OPT_DAEMON		0x002000
-#define OPT_STATS		0x004000
-#define OPT_RATE		0x008000
-#define OPT_THRESHOLDS		0x010000
-#define OPT_PERSISTENTCONN	0x020000
-#define OPT_NOSORT		0x040000
-#define OPT_SYNCID		0x080000
-#define OPT_EXACT		0x100000
-#define OPT_ONEPACKET		0x200000
+#define OPT_NONE        0x000000
+#define OPT_NUMERIC     0x000001
+#define OPT_CONNECTION      0x000002
+#define OPT_SERVICE     0x000004
+#define OPT_SCHEDULER       0x000008
+#define OPT_PERSISTENT      0x000010
+#define OPT_NETMASK     0x000020
+#define OPT_SERVER      0x000040
+#define OPT_FORWARD     0x000080
+#define OPT_WEIGHT      0x000100
+#define OPT_UTHRESHOLD      0x000200
+#define OPT_LTHRESHOLD      0x000400
+#define OPT_MCAST       0x000800
+#define OPT_TIMEOUT     0x001000
+#define OPT_DAEMON      0x002000
+#define OPT_STATS       0x004000
+#define OPT_RATE        0x008000
+#define OPT_THRESHOLDS      0x010000
+#define OPT_PERSISTENTCONN  0x020000
+#define OPT_NOSORT      0x040000
+#define OPT_SYNCID      0x080000
+#define OPT_EXACT       0x100000
+#define OPT_ONEPACKET       0x200000
 #define OPT_PERSISTENCE_ENGINE  0x400000
-#define OPT_LOCAL_ADDRESS	0x800000
+#define OPT_LOCAL_ADDRESS   0x800000
 #define OPT_BLKLST_ADDRESS      0x1000000
-#define OPT_SYNPROXY		0x2000000
-#define OPT_IFNAME		0x4000000
+#define OPT_SYNPROXY        0x2000000
+#define OPT_IFNAME      0x4000000
 #define OPT_SOCKPAIR            0x8000000
-#define NUMBER_OF_OPT		28
+#define OPT_VNI             0x10000000
+#define OPT_HIP             0x20000000
+#define OPT_MAC             0x40000000
+#define OPT_VIP_VNI             0x80000000
+#define NUMBER_OF_OPT       32
 
 #define MINIMUM_IPVS_VERSION_MAJOR      1
 #define MINIMUM_IPVS_VERSION_MINOR      1
 #define MINIMUM_IPVS_VERSION_PATCH      4
 
 #ifndef IPVS_VERSION
-#define IPVS_VERSION(x,y,z)		(((x)<<16)+((y)<<8)+(z))
+#define IPVS_VERSION(x,y,z)     (((x)<<16)+((y)<<8)+(z))
 #endif
 
 /*
@@ -61,18 +65,18 @@
  * overhead. If it is too large, the same will always visit the same
  * server, which may make dynamic load imbalance worse.
  */
-#define IPVS_SVC_PERSISTENT_TIMEOUT	(6*60)
+#define IPVS_SVC_PERSISTENT_TIMEOUT (6*60)
 
 
-typedef struct ip_vs_service_user	ipvs_service_t;
-typedef struct ip_vs_dest_user		ipvs_dest_t;
-typedef struct ip_vs_laddr_user 	ipvs_laddr_t;
+typedef struct ip_vs_service_user   ipvs_service_t;
+typedef struct ip_vs_dest_user      ipvs_dest_t;
+typedef struct ip_vs_laddr_user     ipvs_laddr_t;
 typedef struct ip_vs_blklst_user        ipvs_blklst_t;
-typedef struct ip_vs_timeout_user	ipvs_timeout_t;
-typedef struct ip_vs_daemon_user	ipvs_daemon_t;
-typedef struct ip_vs_service_entry	ipvs_service_entry_t;
-typedef struct ip_vs_dest_entry		ipvs_dest_entry_t;
-typedef struct ip_vs_laddr_entry	ipvs_laddr_entry_t;
+typedef struct ip_vs_timeout_user   ipvs_timeout_t;
+typedef struct ip_vs_daemon_user    ipvs_daemon_t;
+typedef struct ip_vs_service_entry  ipvs_service_entry_t;
+typedef struct ip_vs_dest_entry     ipvs_dest_entry_t;
+typedef struct ip_vs_laddr_entry    ipvs_laddr_entry_t;
 typedef struct ip_vs_blklst_entry       ipvs_blklst_entry_t;
 
 /* ipvs info variable */
@@ -142,22 +146,22 @@ extern struct ip_vs_get_services *ipvs_get_services(void);
 
 /* sort the service entries */
 typedef int (*ipvs_service_cmp_t)(ipvs_service_entry_t *,
-				  ipvs_service_entry_t *);
+                  ipvs_service_entry_t *);
 extern int ipvs_cmp_services(ipvs_service_entry_t *s1,
-			     ipvs_service_entry_t *s2);
+                 ipvs_service_entry_t *s2);
 extern void ipvs_sort_services(struct ip_vs_get_services *s,
-			       ipvs_service_cmp_t f);
+                   ipvs_service_cmp_t f);
 
 /* get the destination array of the specified service */
 extern struct ip_vs_get_dests *ipvs_get_dests(ipvs_service_entry_t *svc);
 
 /* sort the destination entries */
 typedef int (*ipvs_dest_cmp_t)(ipvs_dest_entry_t *,
-			       ipvs_dest_entry_t *);
+                   ipvs_dest_entry_t *);
 extern int ipvs_cmp_dests(ipvs_dest_entry_t *d1,
-			  ipvs_dest_entry_t *d2);
+              ipvs_dest_entry_t *d2);
 extern void ipvs_sort_dests(struct ip_vs_get_dests *d,
-			    ipvs_dest_cmp_t f);
+                ipvs_dest_cmp_t f);
 
 /* get an ipvs service entry */
 extern ipvs_service_entry_t *ipvs_get_service(struct ip_vs_service_user *hint);

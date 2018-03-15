@@ -222,6 +222,9 @@ int dp_vs_new_dest(struct dp_vs_service *svc, struct dp_vs_dest_conf *udest,
     }
     assert(dest->svc == NULL);
 
+    dest->hip = udest->hip;
+    ether_addr_copy(&udest->mac, &dest->mac);
+    dest->vx_vni_rs = udest->vx_vni_rs;
     dest->af = svc->af;
     dest->proto = svc->proto;
     dest->vaddr = svc->addr;
@@ -524,6 +527,9 @@ int dp_vs_get_dest_entries(const struct dp_vs_service *svc,
         memset(&entry, 0, sizeof(entry));
         entry.addr = dest->addr.in.s_addr;
         entry.port = dest->port;
+        entry.hip = dest->hip.in.s_addr;
+        ether_addr_copy(&dest->mac, &entry.mac);
+        entry.vx_vni_rs = dest->vx_vni_rs;
         entry.conn_flags = dest->fwdmode;
         entry.weight = rte_atomic16_read(&dest->weight);
         entry.max_conn = dest->max_conn;

@@ -20,6 +20,7 @@
 #include <assert.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <netinet/udp.h>
 #include <sys/ioctl.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
@@ -41,7 +42,10 @@
 #include <rte_arp.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-
+#include <linux/tcp.h>
+#include "ipv4.h"
+#include "vxlan.h"
+#include "ipvs/ipvs.h"
 
 #define NETIF_PKTPOOL_NB_MBUF_DEF   65535
 #define NETIF_PKTPOOL_NB_MBUF_MIN   1023
@@ -78,6 +82,9 @@ static portid_t port_id_end = 0;
 static uint16_t g_nports;
 
 static uint64_t cycles_per_sec;
+
+extern int g_vxlan_port_inbound;
+extern int g_vxlan_port_outbound;
 
 #define NETIF_BOND_MODE_DEF     BONDING_MODE_ROUND_ROBIN
 
@@ -882,7 +889,7 @@ static inline void netif_pktmbuf_pool_init(void)
     for (i = 0; i < NETIF_MAX_SOCKETS; i++) {
         snprintf(poolname, sizeof(poolname), "mbuf_pool_%d", i);
         pktmbuf_pool[i] = rte_pktmbuf_pool_create(poolname, netif_pktpool_nb_mbuf,
-                netif_pktpool_mbuf_cache, 0, RTE_MBUF_DEFAULT_BUF_SIZE, i);
+                netif_pktpool_mbuf_cache, dp_vs_vxlan_info_size(), RTE_MBUF_DEFAULT_BUF_SIZE, i);
         if (!pktmbuf_pool[i])
             rte_exit(EXIT_FAILURE, "Cannot init mbuf pool on socket %d", i);
     }
@@ -2180,10 +2187,47 @@ static int netif_arp_ring_init(void)
     return EDPVS_OK;
 }
 
-static void lcore_process_packets(struct netif_queue_conf *qconf, struct rte_mbuf **mbufs,
+static bool vxlan_rcv(struct rte_mbuf *mbuf) 
+{
+    struct vxlan_hdr *vxh;
+    struct ether_hdr *phdr;
+    struct dp_vs_vxlan_info *vxi;
+    struct ipv4_hdr *ip4h;
+    int ip4h_len;
+
+    ip4h  = rte_pktmbuf_mtod_offset(mbuf, struct ipv4_hdr *, sizeof(struct ether_hdr));
+    ip4h_len = (ip4h->version_ihl & 0xf) << 2;
+
+    if (ip4h->next_proto_id == IPPROTO_UDP) {
+        struct udphdr *udph = rte_pktmbuf_mtod_offset(mbuf, struct udphdr *, sizeof(struct ether_hdr) + ip4h_len);
+        if (udph->dest == rte_cpu_to_be_16(g_vxlan_port_outbound) || udph->dest == rte_cpu_to_be_16(g_vxlan_port_inbound)) {
+            RTE_LOG(DEBUG, NETIF, "%s: vxlan packet received.\n", __func__);
+
+            vxh = (struct vxlan_hdr *) &udph[1];
+            phdr = (struct ether_hdr *) &vxh[1];
+
+            vxi = get_priv(mbuf);
+            if (udph->dest == rte_cpu_to_be_16(g_vxlan_port_inbound)) {
+                vxi->vx_vni_vip = rte_be_to_cpu_32(vxh->vx_vni << 8);
+                vxi->vtep_peer_addr.in.s_addr = ip4h->src_addr;
+                ether_addr_copy(&phdr->s_addr, &vxi->smac_inner);
+            }else if (udph->dest == rte_cpu_to_be_16(g_vxlan_port_outbound)) {
+                vxi->vx_vni_vip = rte_be_to_cpu_32(vxh->vx_flags & 0xffff0000); //vxlan header reserved option is used to save vx_vni_vip
+                vxi->vx_vni_rs = rte_be_to_cpu_32(vxh->vx_vni << 8);
+            }
+            rte_pktmbuf_adj(mbuf, sizeof(struct ether_hdr) + ip4h_len + sizeof(struct udp_hdr) + sizeof(struct vxlan_hdr));
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void lcore_process_packets(struct netif_queue_conf *qconf, struct rte_mbuf **mbufs,
                       lcoreid_t cid, uint16_t count, bool pretetch)
 {
-    int i, t;
+    int i, t = 0;
     struct ether_hdr *eth_hdr;
     bool pkts_from_ring = !pretetch;
     struct rte_mbuf *mbuf_copied = NULL;
@@ -2214,6 +2258,8 @@ static void lcore_process_packets(struct netif_queue_conf *qconf, struct rte_mbu
             t++;
         }
 
+
+reinject:
         eth_hdr = rte_pktmbuf_mtod(mbuf, struct ether_hdr *);
         /* reuse mbuf.packet_type, it was RTE_PTYPE_XXX */
         mbuf->packet_type = eth_type_parse(eth_hdr, dev);
@@ -2245,8 +2291,8 @@ static void lcore_process_packets(struct netif_queue_conf *qconf, struct rte_mbu
          * if HW offload vlan strip, it's still need vlan module
          * to act as VLAN filter.
          */
-        if (eth_hdr->ether_type == htons(ETH_P_8021Q) ||
-            mbuf->ol_flags & PKT_RX_VLAN_STRIPPED) {
+        if (eth_hdr->ether_type == htons(ETH_P_8021Q) || mbuf->ol_flags & PKT_RX_VLAN_STRIPPED) {
+            RTE_LOG(DEBUG, NETIF, "%s: vlan packet received.\n", __func__);
 
             if (vlan_rcv(mbuf, netif_port_get(mbuf->port)) != EDPVS_OK) {
                 rte_pktmbuf_free(mbuf);
@@ -2263,6 +2309,10 @@ static void lcore_process_packets(struct netif_queue_conf *qconf, struct rte_mbu
 
             eth_hdr = rte_pktmbuf_mtod(mbuf, struct ether_hdr *);
         }
+
+        if (eth_hdr->ether_type == htons(ETHER_TYPE_IPv4) && vxlan_rcv(mbuf))
+            goto reinject;
+
         /* handler should free mbuf */
         netif_deliver_mbuf(mbuf, eth_hdr->ether_type, dev, qconf,
                            (dev->flag & NETIF_PORT_FLAG_FORWARD2KNI) ? true:false,

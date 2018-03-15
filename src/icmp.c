@@ -37,7 +37,7 @@ static void icmp_dump_hdr(const struct rte_mbuf *mbuf)
     struct icmp_hdr *ich = rte_pktmbuf_mtod(mbuf, struct icmp_hdr *);
     lcoreid_t lcore = rte_lcore_id();
 
-    fprintf(stderr, "lcore %d port %d icmp type %u code %u id %u seq %u\n",
+    RTE_LOG(DEBUG, ICMP, "lcore %d port %d icmp type %u code %u id %u seq %u\n",
             lcore, mbuf->port, ich->icmp_type, ich->icmp_code, 
             ntohs(ich->icmp_ident), ntohs(ich->icmp_seq_nb));
 

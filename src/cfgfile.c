@@ -70,6 +70,9 @@ static vector_t install_keywords(void)
     install_control_keywords();
 
     install_keyword_root("ipvs_defs", NULL);
+    install_keyword("tunnel", NULL, KW_TYPE_NORMAL);
+    install_ipvs_tunnel_keywords();
+
     install_keyword("conn", NULL, KW_TYPE_NORMAL);
     install_ipvs_conn_keywords();
 

@@ -19,6 +19,7 @@
 #include "common.h"
 #include "dpdk.h"
 #include "ipv4.h"
+#include "vxlan.h"
 #include "ipvs/ipvs.h"
 #include "ipvs/proto.h"
 #include "ipvs/proto_udp.h"
@@ -78,6 +79,9 @@ udp_conn_lookup(struct dp_vs_proto *proto,
 {
     struct udp_hdr *uh, _udph;
     assert(proto && iph && mbuf);
+    struct dp_vs_vxlan_info *vxi = get_priv(mbuf);
+    uint32_t vx_vni_vip = vxi->vx_vni_vip ? vxi->vx_vni_vip : 0;
+    uint32_t vx_vni_rs = vxi->vx_vni_rs ? vxi->vx_vni_rs : 0;
 
     uh = mbuf_header_pointer(mbuf, iph->len, sizeof(_udph), &_udph);
     if (unlikely(!uh))
@@ -89,7 +93,7 @@ udp_conn_lookup(struct dp_vs_proto *proto,
     }  
 
     return dp_vs_conn_get(iph->af, iph->proto, 
-                          &iph->saddr, &iph->daddr, 
+                          &iph->saddr, &iph->daddr, vx_vni_vip, vx_vni_rs,
                           uh->src_port, uh->dst_port, 
                           direct, reverse);
 }

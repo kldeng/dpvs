@@ -22,8 +22,14 @@
 #include "route.h"
 #include "icmp.h"
 #include "neigh.h"
+#include "vxlan.h"
 #include "ipvs/xmit.h"
 #include "parser/parser.h"
+#include <netinet/tcp.h>
+#include "ipvs/proto_tcp.h"
+
+extern int g_vxlan_port_inbound;
+extern int g_vxlan_port_outbound;
 
 static bool fast_xmit_close = false;
 static bool xmit_ttl = false;
@@ -744,11 +750,13 @@ int dp_vs_out_xmit_nat(struct dp_vs_proto *proto,
             goto errout;
     }
 
-    if (likely(mbuf->ol_flags & PKT_TX_IP_CKSUM)) {
+    if (likely(mbuf->ol_flags & PKT_TX_IP_CKSUM))
         iph->hdr_checksum = 0;
-    } else {
+    else
         ip4_send_csum(iph);
-    }
+
+    if (conn->vx_vni_vip)
+        vxlan_encap(mbuf, DPVS_CONN_DIR_OUTBOUND, conn->vx_vni_vip, 0, conn->vtep_peer_addr, conn->smac_inner);
 
     return INET_HOOK(INET_HOOK_LOCAL_OUT, mbuf, NULL, rt->port, ipv4_output);
 
@@ -827,6 +835,53 @@ int dp_vs_xmit_tunnel(struct dp_vs_proto *proto,
 errout:
     if (rt)
         route4_put(rt);
+    rte_pktmbuf_free(mbuf);
+    return err;
+}
+
+int dp_vs_xmit_nat_tunnel(struct dp_vs_proto *proto,          
+        struct dp_vs_conn *conn,
+        struct rte_mbuf *mbuf)
+{
+    struct ipv4_hdr *iph = ip4_hdr(mbuf);
+    struct route_entry *rt;
+    int err;
+    struct netif_port *dev = netif_port_get(mbuf->port);
+
+    /* drop old route. just for safe, because
+     * NAT+TUNNEL is PREROUTING, should not have route.
+     * */
+    if (unlikely(mbuf->userdata != NULL)) {
+        RTE_LOG(WARNING, IPVS, "%s: NAT+TUNNEL have route %p ?\n",
+                __func__, mbuf->userdata);
+        route4_put((struct route_entry*)mbuf->userdata);
+    }
+
+    /* L3 translation before l4 re-csum */
+    iph->hdr_checksum = 0;
+    iph->dst_addr = conn->daddr.in.s_addr;
+
+    /* L4 NAT Translation */
+    // disable csum offload in nat+tunnel foward mode
+    dev->flag  &=  ~(NETIF_PORT_FLAG_TX_TCP_CSUM_OFFLOAD);
+
+    if (proto->nat_in_handler) {
+        err = proto->nat_in_handler(proto, conn, mbuf);
+        if (err != EDPVS_OK)
+            goto errout;
+    }
+
+    if (likely(mbuf->ol_flags & PKT_TX_IP_CKSUM)) 
+        iph->hdr_checksum = 0;
+    else 
+        ip4_send_csum(iph);
+
+    vxlan_encap(mbuf, DPVS_CONN_DIR_INBOUND, conn->vx_vni_vip, conn->dest->vx_vni_rs, conn->dest->hip, conn->dest->mac);
+    rt = (struct route_entry *) mbuf->userdata;
+
+    return INET_HOOK(INET_HOOK_LOCAL_OUT, mbuf, NULL, rt->port, ipv4_output);
+
+errout:
     rte_pktmbuf_free(mbuf);
     return err;
 }

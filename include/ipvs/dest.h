@@ -32,13 +32,13 @@ enum dpvs_fwd_mode {
     DPVS_FWD_MODE_FNAT      = 5,
     DPVS_FWD_MODE_NAT       = DPVS_FWD_MASQ,
     DPVS_FWD_MODE_SNAT      = 6,
+    DPVS_FWD_MODE_NAT_TUNNEL= 7,
 };
 
 enum {
     DPVS_DEST_F_AVAILABLE       = 0x1<<0,
     DPVS_DEST_F_OVERLOAD        = 0x1<<1,
 };
-
 
 struct dp_vs_dest {
     struct list_head    n_list;     /* for the dests in the service */
@@ -52,6 +52,13 @@ struct dp_vs_dest {
      */
     union inet_addr     addr;       /* IP address of the server */
     uint16_t            port;       /* port number of the server */
+
+    /*
+     * vni/mac/hip is using for VPC 
+     */
+    union inet_addr     hip;    /* hypervisor ip where rs reside */
+    struct ether_addr   mac;  /* mac address of rs */
+    uint32_t            vx_vni_rs;        /* VNI (24) + Reserved (8). */
 
     volatile unsigned   flags;      /* dest status flags */
     rte_atomic16_t      conn_flags; /* flags to copy to conn */
@@ -87,6 +94,9 @@ struct dp_vs_dest_conf {
     enum dpvs_fwd_mode fwdmode;
     /* real server options */
     unsigned conn_flags;    /* connection flags */
+    union inet_addr hip;    /* hypervisor ip where rs reside */
+    struct ether_addr mac;  /* mac address of rs */
+    uint32_t vx_vni_rs;        /* VNI (24) + Reserved (8). */
     int weight;     /* destination weight */
 
     /* thresholds for active connections */
@@ -97,6 +107,9 @@ struct dp_vs_dest_conf {
 struct dp_vs_dest_entry {
     uint32_t addr;        /* destination address */
     uint16_t port;
+    uint32_t hip;    /* hypervisor ip where rs reside */
+    struct ether_addr mac;  /* mac address of rs */
+    uint32_t vx_vni_rs;        /* VNI (24) + Reserved (8). */
     unsigned conn_flags;    /* connection flags */
     int weight;     /* destination weight */
 
@@ -115,6 +128,7 @@ struct dp_vs_get_dests {
     /* which service: user fills in these */
     uint16_t    proto;
     uint32_t    addr;        /* virtual address */
+    uint32_t 	vx_vni_vip;    /* vip's vni, only used in internal LB */
     uint16_t    port;
     uint32_t    fwmark;       /* firwall mark of service */
 
@@ -134,6 +148,9 @@ struct dp_vs_dest_user{
     uint32_t addr;
     uint16_t port;
 
+    uint32_t vx_vni_rs;        /* VNI (24) + Reserved (8). */
+    uint32_t hip;    /* hypervisor ip where rs reside */
+    struct ether_addr mac;  /* mac address of rs */
     unsigned conn_flags;
     int weight;
 

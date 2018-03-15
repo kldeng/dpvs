@@ -29,7 +29,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/socket.h>
-#include <linux/if.h>
+//#include <linux/if.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include "common.h"
@@ -37,6 +37,7 @@
 #include "netif.h"
 #include "netif_addr.h"
 #include "kni.h"
+#include "vxlan.h"
 
 #define Kni /* KNI is defined */
 #define RTE_LOGTYPE_Kni     RTE_LOGTYPE_USER1

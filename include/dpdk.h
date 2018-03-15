@@ -54,6 +54,7 @@
 #include <rte_kni.h>
 #include <rte_ip_frag.h>
 #include <rte_eth_bond.h>
+#include <rte_hash_crc.h>
 #include "mbuf.h"
 
 typedef uint8_t lcoreid_t;

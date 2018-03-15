@@ -44,6 +44,8 @@ struct dp_vs_conn_param {
     uint16_t            proto;
     const union inet_addr *caddr;
     const union inet_addr *vaddr;
+    const union inet_addr *vtep_peer_addr;
+    uint32_t            vx_vni_vip;
     uint16_t            cport;
     uint16_t            vport;
     uint16_t            ct_dport; /* RS port for template connection */
@@ -58,6 +60,8 @@ struct conn_tuple_hash {
     uint16_t            proto;
     union inet_addr     saddr;  /* pkt's source addr */
     union inet_addr     daddr;  /* pkt's dest addr */
+    uint32_t            vx_vni_vip; /* vip's vni */
+    uint32_t            vx_vni_rs;  /* rs's vni */
     uint16_t            sport;
     uint16_t            dport;
 } __rte_cache_aligned;
@@ -77,6 +81,9 @@ struct dp_vs_conn {
     union inet_addr         vaddr;  /* Virtual address */
     union inet_addr         laddr;  /* director Local address */
     union inet_addr         daddr;  /* Destination (RS) address */
+    union inet_addr         vtep_peer_addr;    /* only used in internal LB */
+    struct ether_addr       smac_inner;
+    uint32_t                vx_vni_vip;     /* vip's vni, only used in internal LB */
     uint16_t                cport;
     uint16_t                vport;
     uint16_t                lport;
@@ -158,12 +165,9 @@ dp_vs_conn_new(struct rte_mbuf *mbuf,
                uint32_t flags);
 int dp_vs_conn_del(struct dp_vs_conn *conn);
 
-struct dp_vs_conn *
-dp_vs_conn_get(int af, uint16_t proto, 
-                const union inet_addr *saddr, 
-                const union inet_addr *daddr, 
-                uint16_t sport, uint16_t dport,
-                int *dir, bool reverse);
+struct dp_vs_conn *dp_vs_conn_get(int af, uint16_t proto,
+            const union inet_addr *saddr, const union inet_addr *daddr,
+                uint32_t vx_vni_vip, uint32_t vx_vni_rs, uint16_t sport, uint16_t dport, int *dir, bool reverse);
 
 struct dp_vs_conn *
 dp_vs_ct_in_get(int af, uint16_t proto,
@@ -176,6 +180,7 @@ void dp_vs_conn_put(struct dp_vs_conn *conn);
 void dp_vs_conn_put_no_reset(struct dp_vs_conn *conn);
 
 void ipvs_conn_keyword_value_init(void);
+void install_ipvs_tunnel_keywords(void);
 void install_ipvs_conn_keywords(void);
 
 static inline void dp_vs_conn_fill_param(int af, uint8_t proto, 

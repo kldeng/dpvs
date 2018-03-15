@@ -527,7 +527,7 @@ int dp_vs_synproxy_syn_rcv(int af, struct rte_mbuf *mbuf,
 
     if (th->syn && !th->ack && !th->rst && !th->fin &&
             (svc = dp_vs_service_lookup(af, iph->proto, 
-                                        &iph->daddr, th->dest, 0, NULL, NULL)) &&
+                                        &iph->daddr, th->dest, 0, mbuf, NULL)) &&
             (svc->flags & DP_VS_SVC_F_SYNPROXY)) {
         /* if service's weight is zero (non-active realserver),
          * do noting and drop the packet */
@@ -587,9 +587,9 @@ int dp_vs_synproxy_syn_rcv(int af, struct rte_mbuf *mbuf,
     if (unlikely(EDPVS_OK != (ret = netif_xmit(mbuf, dev)))) {
         RTE_LOG(ERR, IPVS, "%s: netif_xmit failed -- %s\n",
                 __func__, dpvs_strerror(ret));
-	/* should not set verdict to INET_DROP since netif_xmit
-	 * always consume the mbuf while INET_DROP means mbuf'll
-	 * be free in INET_HOOK.*/
+    /* should not set verdict to INET_DROP since netif_xmit
+     * always consume the mbuf while INET_DROP means mbuf'll
+     * be free in INET_HOOK.*/
     }
 
     *verdict = INET_STOLEN;
@@ -765,7 +765,7 @@ int dp_vs_synproxy_ack_rcv(int af, struct rte_mbuf *mbuf,
     /* Do not check svc syn-proxy flag, as it may be changed after syn-proxy step 1. */
     if (!th->syn && th->ack && !th->rst && !th->fin &&
             (svc = dp_vs_service_lookup(af, iph->proto, &iph->daddr,
-                                        th->dest, 0, NULL, NULL))) {
+                                        th->dest, 0, mbuf, NULL))) {
         if (dp_vs_synproxy_ctrl_defer &&
                 !syn_proxy_ack_has_data(mbuf, iph, th)) {
             /* Update statistics */

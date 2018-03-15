@@ -54,6 +54,8 @@ struct ip_vs_sockpair {
     __be16 tport;
     __be32 sip;
     __be32 tip;
+    uint32_t vx_vni_vip;
+    uint32_t vx_vni_rs;
 };
 
 typedef struct ip_vs_sockpair ipvs_sockpair_t;
@@ -65,6 +67,8 @@ struct ip_vs_conn_entry {
     __be32      vaddr;
     __be32      laddr;
     __be32      daddr;
+    uint32_t    vx_vni_vip;
+    uint32_t    vx_vni_rs;
     uint16_t   cport;
     uint16_t   vport;
     uint16_t   lport;

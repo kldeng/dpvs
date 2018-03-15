@@ -20,6 +20,7 @@
 #include "common.h"
 #include "inet.h"
 #include "ipv4.h"
+#include "vxlan.h"
 #include "sa_pool.h"
 #include "ipvs/ipvs.h"
 #include "ipvs/conn.h"
@@ -47,6 +48,12 @@ static int conn_pool_cache = DPVS_CONN_CACHE_SIZE_DEF;
 
 #define DPVS_CONN_INIT_TIMEOUT_DEF  3   /* sec */
 static int conn_init_timeout = DPVS_CONN_INIT_TIMEOUT_DEF;
+
+#define DPVS_VXLAN_PORT_INBOUND_DEF 4789
+#define DPVS_VXLAN_PORT_OUTBOUND_DEF    9472
+
+int g_vxlan_port_inbound = DPVS_VXLAN_PORT_INBOUND_DEF;
+int g_vxlan_port_outbound = DPVS_VXLAN_PORT_OUTBOUND_DEF;
 
 /* helpers */
 #define this_conn_tab           (RTE_PER_LCORE(dp_vs_conn_tab))
@@ -227,6 +234,10 @@ static int conn_bind_dest(struct dp_vs_conn *conn, struct dp_vs_dest *dest)
     case DPVS_FWD_MODE_SNAT:
         conn->packet_xmit = dp_vs_xmit_snat;
         conn->packet_out_xmit = dp_vs_out_xmit_snat;
+        break;
+    case DPVS_FWD_MODE_NAT_TUNNEL:
+        conn->packet_xmit = dp_vs_xmit_nat_tunnel;
+        conn->packet_out_xmit = dp_vs_out_xmit_nat;
         break;
     default:
         return EDPVS_NOTSUPP;
@@ -531,6 +542,7 @@ struct dp_vs_conn * dp_vs_conn_new(struct rte_mbuf *mbuf,
 {
     struct dp_vs_conn *new;
     struct conn_tuple_hash *t;
+    struct dp_vs_vxlan_info *vxi = get_priv(mbuf);
     uint16_t rport;
     __be16 _ports[2], *ports;
     int err;
@@ -571,6 +583,10 @@ struct dp_vs_conn * dp_vs_conn_new(struct rte_mbuf *mbuf,
     t->sport    = param->cport;
     t->daddr    = *param->vaddr;
     t->dport    = param->vport;
+    if (vxi->vx_vni_vip) {
+        t->vx_vni_vip = vxi->vx_vni_vip;
+        t->vx_vni_rs = dest->vx_vni_rs;
+    }
     INIT_LIST_HEAD(&t->list);
 
     /* init outbound conn tuple hash */
@@ -585,6 +601,10 @@ struct dp_vs_conn * dp_vs_conn_new(struct rte_mbuf *mbuf,
     t->sport    = rport;
     t->daddr    = *param->caddr;    /* non-FNAT */
     t->dport    = param->cport;     /* non-FNAT */
+    if (vxi->vx_vni_vip) {
+        t->vx_vni_vip = vxi->vx_vni_vip;
+        t->vx_vni_rs = dest->vx_vni_rs;
+    }
     INIT_LIST_HEAD(&t->list);
 
     /* init connection */
@@ -596,6 +616,11 @@ struct dp_vs_conn * dp_vs_conn_new(struct rte_mbuf *mbuf,
     new->vport  = param->vport;
     new->laddr  = *param->caddr;    /* non-FNAT */
     new->lport  = param->cport;     /* non-FNAT */
+    if (vxi->vx_vni_vip) {
+        new->vx_vni_vip = vxi->vx_vni_vip;
+        new->vtep_peer_addr = vxi->vtep_peer_addr;
+        ether_addr_copy(&vxi->smac_inner, &new->smac_inner);
+    }
     if (dest->fwdmode == DPVS_FWD_MODE_SNAT)
         new->daddr.in.s_addr  = ip4_hdr(mbuf)->src_addr;
     else
@@ -707,8 +732,8 @@ errout:
  * return conn found and direction as well or NULL if not exist.
  */
 struct dp_vs_conn *dp_vs_conn_get(int af, uint16_t proto,
-            const union inet_addr *saddr, const union inet_addr *daddr,
-            uint16_t sport, uint16_t dport, int *dir, bool reverse)
+            const union inet_addr *saddr, const union inet_addr *daddr, 
+        uint32_t vx_vni_vip, uint32_t vx_vni_rs, uint16_t sport, uint16_t dport, int *dir, bool reverse)
 {
     uint32_t hash;
     struct conn_tuple_hash *tuphash;
@@ -731,6 +756,7 @@ struct dp_vs_conn *dp_vs_conn_get(int af, uint16_t proto,
                     && tuphash->dport == sport
                     && inet_addr_equal(af, &tuphash->saddr, daddr)
                     && inet_addr_equal(af, &tuphash->daddr, saddr)
+            && tuphash->vx_vni_vip == vx_vni_vip
                     && tuphash->proto == proto
                     && tuphash->af == af) {
                 /* hit */
@@ -747,6 +773,7 @@ struct dp_vs_conn *dp_vs_conn_get(int af, uint16_t proto,
                     && tuphash->dport == dport
                     && inet_addr_equal(af, &tuphash->saddr, saddr)
                     && inet_addr_equal(af, &tuphash->daddr, daddr)
+            && tuphash->vx_vni_vip == vx_vni_vip
                     && tuphash->proto == proto
                     && tuphash->af == af) {
                 /* hit */
@@ -763,10 +790,11 @@ struct dp_vs_conn *dp_vs_conn_get(int af, uint16_t proto,
 #endif
 
 #ifdef CONFIG_DPVS_IPVS_DEBUG
-    RTE_LOG(DEBUG, IPVS, "conn lookup: [%d] %s %s:%d -> %s:%d %s %s\n",
+    RTE_LOG(DEBUG, IPVS, "conn lookup: [%d] %s %s:%d -> %s:%d vni_vip:%u vni_rs:%u %s %s\n",
             rte_lcore_id(), inet_proto_name(proto),
             inet_ntop(af, saddr, sbuf, sizeof(sbuf)) ? sbuf : "::", ntohs(sport),
             inet_ntop(af, daddr, dbuf, sizeof(dbuf)) ? dbuf : "::", ntohs(dport),
+        vx_vni_vip, vx_vni_rs,
             conn ? "hit" : "miss", reverse ? "reverse" : "");
 #endif
 
@@ -1021,6 +1049,7 @@ static inline void sockopt_fill_conn_entry(const struct dp_vs_conn *conn,
     entry->daddr = conn->daddr.in.s_addr;
     entry->cport = conn->cport;
     entry->vport = conn->vport;
+    entry->vx_vni_vip = conn->vx_vni_vip;
     entry->lport = conn->lport;
     entry->dport = conn->dport;
     entry->timeout = conn->timeout.tv_sec;
@@ -1311,10 +1340,10 @@ static int conn_get_msgcb_slave(struct dpvs_msg *msg)
         return EDPVS_INVAL;
 
     conn = dp_vs_conn_get(conn_req->sockpair.af, conn_req->sockpair.proto,
-            &sip, &tip, conn_req->sockpair.sport, conn_req->sockpair.tport, &dir, 0);
+            &sip, &tip, conn_req->sockpair.vx_vni_vip, conn_req->sockpair.vx_vni_rs, conn_req->sockpair.sport, conn_req->sockpair.tport, &dir, 0);
     if (!conn) {
         conn = dp_vs_conn_get(conn_req->sockpair.af, conn_req->sockpair.proto,
-                    &sip, &tip, conn_req->sockpair.sport,
+                    &sip, &tip, conn_req->sockpair.vx_vni_vip, conn_req->sockpair.vx_vni_rs, conn_req->sockpair.sport,
                     conn_req->sockpair.tport, &dir, 1);
     }
 
@@ -1577,6 +1606,44 @@ static void conn_init_timeout_handler(vector_t tokens)
     FREE_PTR(str);
 }
 
+static void vxlan_port_inbound_handler(vector_t tokens)
+{
+    char *str = set_value(tokens);
+    int port;
+
+    assert(str);
+    port = atoi(str);
+    if (port >= VXLAN_PORT_MIN && port <= VXLAN_PORT_MAX) {
+        RTE_LOG(INFO, IPVS, "vxlan_port_inbound = %d\n", port);
+        g_vxlan_port_inbound = port;
+    } else {
+        RTE_LOG(WARNING, IPVS, "invalid inbound vxlan port %s, using default %d\n",
+                str, DPVS_VXLAN_PORT_INBOUND_DEF);
+        g_vxlan_port_inbound = DPVS_VXLAN_PORT_INBOUND_DEF;
+    }
+
+    FREE_PTR(str);
+}
+
+static void vxlan_port_outbound_handler(vector_t tokens)
+{
+    char *str = set_value(tokens);
+    int port;
+
+    assert(str);
+    port = atoi(str);
+    if (port >= VXLAN_PORT_MIN && port <= VXLAN_PORT_MAX) {
+        RTE_LOG(DEBUG, IPVS, "vxlan_port_outbound = %d\n", port);
+        g_vxlan_port_outbound = port;
+    } else {
+        RTE_LOG(WARNING, IPVS, "invalid outbound vxlan port %s, using default %d\n",
+                str, DPVS_VXLAN_PORT_OUTBOUND_DEF);
+        g_vxlan_port_inbound = DPVS_VXLAN_PORT_OUTBOUND_DEF;
+    }
+
+    FREE_PTR(str);
+}
+
 static void conn_expire_quiscent_template_handler(vector_t tokens)
 {
     RTE_LOG(INFO, IPVS, "conn_expire_quiescent_template ON\n");
@@ -1604,5 +1671,13 @@ void install_ipvs_conn_keywords(void)
     install_keyword("expire_quiescent_template", conn_expire_quiscent_template_handler,
             KW_TYPE_NORMAL);
     install_xmit_keywords();
+    install_sublevel_end();
+}
+
+void install_ipvs_tunnel_keywords(void)
+{
+    install_sublevel();
+    install_keyword("vxlan_port_inbound", vxlan_port_inbound_handler, KW_TYPE_NORMAL);
+    install_keyword("vxlan_port_outbound", vxlan_port_outbound_handler, KW_TYPE_NORMAL);
     install_sublevel_end();
 }

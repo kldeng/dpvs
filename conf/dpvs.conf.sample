@@ -241,6 +241,12 @@ ctrl_defs {
 
 ! ipvs config
 ipvs_defs {
+
+    tunnel {
+	vxlan_port_inbound	4789
+	vxlan_port_outbound	9742
+    }
+
     conn {
         <init> conn_pool_size       2097152
         <init> conn_pool_cache      256
@@ -259,6 +265,7 @@ ipvs_defs {
 
     tcp {
         defence_tcp_drop
+	remove_ts_option
         timeout {
             none        2
             established 90

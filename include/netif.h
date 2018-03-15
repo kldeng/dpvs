@@ -67,6 +67,10 @@ enum {
 
 #define NETIF_LCORE_ID_INVALID      0xFF
 
+#define NETIF_MAX_DATA_LEN          9000
+#define NETIF_MAX_FRAME_LEN         NETIF_MAX_DATA_LEN + 14 + 4 /* MTU + Ethernet Header + FCS */
+
+
 /************************* lcore conf  ***************************/
 struct rx_partner;
 
@@ -363,5 +367,7 @@ static inline char *eth_addr_dump(const struct ether_addr *ea,
              ea->addr_bytes[4], ea->addr_bytes[5]);
     return buf;
 }
+void lcore_process_packets(struct netif_queue_conf *qconf, struct rte_mbuf **mbufs,
+                      lcoreid_t cid, uint16_t count, bool pretetch);
 
 #endif /* __DPVS_NETIF_H__ */

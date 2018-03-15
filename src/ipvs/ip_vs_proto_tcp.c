@@ -20,6 +20,7 @@
 #include "common.h"
 #include "dpdk.h"
 #include "ipv4.h"
+#include "vxlan.h"
 #include "ipvs/ipvs.h"
 #include "ipvs/proto.h"
 #include "ipvs/proto_tcp.h"
@@ -35,6 +36,7 @@
 #include <openssl/sha.h>
 
 static int g_defence_tcp_drop = 0;
+static int g_remove_ts_option = 0;
 
 static int tcp_timeouts[DPVS_TCP_S_LAST + 1] = {
     [DPVS_TCP_S_NONE]           = 2,    /* in seconds */
@@ -433,6 +435,9 @@ static int tcp_conn_sched(struct dp_vs_proto *proto,
     struct tcphdr *th, _tcph;
     struct dp_vs_service *svc;
     assert(proto && iph && mbuf && conn && verdict);
+    struct dp_vs_vxlan_info *vxi = get_priv(mbuf);
+    uint32_t vx_vni_vip = vxi->vx_vni_vip ? vxi->vx_vni_vip : 0;
+
 
     th = mbuf_header_pointer(mbuf, iph->len, sizeof(_tcph), &_tcph);
     if (unlikely(!th)) {
@@ -444,6 +449,7 @@ static int tcp_conn_sched(struct dp_vs_proto *proto,
     /* When synproxy disabled, only SYN packets can arrive here.
      * So don't judge SYNPROXY flag here! If SYNPROXY flag judged, and syn_proxy
      * got disbled and keepalived reloaded, SYN packets for RS may never be sent. */
+
     if (dp_vs_synproxy_ack_rcv(iph->af, mbuf, th, proto, conn, iph, verdict) == 0) {
         /* Attention: First ACK packet is also stored in conn->ack_mbuf */
         return EDPVS_PKTSTOLEN;
@@ -465,7 +471,7 @@ static int tcp_conn_sched(struct dp_vs_proto *proto,
 
         /* Drop tcp packet which is send to vip and !vport */
         if (g_defence_tcp_drop &&
-                (svc = dp_vs_lookup_vip(iph->af, iph->proto, &iph->daddr))) {
+                (svc = dp_vs_lookup_vip(iph->af, iph->proto, &iph->daddr, vx_vni_vip))) {
             dp_vs_estats_inc(DEFENCE_TCP_DROP);
             *verdict = INET_DROP;
             return EDPVS_INVPKT;
@@ -480,7 +486,7 @@ static int tcp_conn_sched(struct dp_vs_proto *proto,
     if (!svc) {
         /* Drop tcp packet which is send to vip and !vport */
         if (g_defence_tcp_drop &&
-                (svc = dp_vs_lookup_vip(iph->af, iph->proto, &iph->daddr))) {
+                (svc = dp_vs_lookup_vip(iph->af, iph->proto, &iph->daddr, vx_vni_vip))) {
             dp_vs_estats_inc(DEFENCE_TCP_DROP);
             *verdict = INET_DROP;
             return EDPVS_INVPKT;
@@ -507,6 +513,11 @@ tcp_conn_lookup(struct dp_vs_proto *proto, const struct dp_vs_iphdr *iph,
 {
     struct tcphdr *th, _tcph;
     assert(proto && iph && mbuf);
+    struct dp_vs_vxlan_info *vxi = get_priv(mbuf);
+    uint32_t vx_vni_vip = vxi->vx_vni_vip ? vxi->vx_vni_vip : 0;
+    uint32_t vx_vni_rs = vxi->vx_vni_rs ? vxi->vx_vni_rs : 0;
+
+    RTE_LOG(DEBUG, IPVS, "%s: mbuf->userdata is %s. vx_vni_vip = %u, vx_vni_rs = %u\n", __func__, mbuf->userdata? "set":"none", vxi->vx_vni_vip, vxi->vx_vni_rs);
 
     th = mbuf_header_pointer(mbuf, iph->len, sizeof(_tcph), &_tcph);
     if (unlikely(!th))
@@ -518,7 +529,7 @@ tcp_conn_lookup(struct dp_vs_proto *proto, const struct dp_vs_iphdr *iph,
     }
 
     return dp_vs_conn_get(iph->af, iph->proto, 
-            &iph->saddr, &iph->daddr, th->source, th->dest, direct, reverse);
+            &iph->saddr, &iph->daddr, vx_vni_vip, vx_vni_rs, th->source, th->dest, direct, reverse);
 }
 
 static int tcp_fnat_in_handler(struct dp_vs_proto *proto,
@@ -659,6 +670,11 @@ static int tcp_snat_in_handler(struct dp_vs_proto *proto,
     /* L4 translation */
     th->dest = conn->dport;
 
+    /* remove tcp timestamp option of SYN packet if g_remove_ts_option is enable */
+    if (th->syn && !th->ack && g_remove_ts_option) {
+        tcp_in_remove_ts(th);
+    }
+
     /* L4 re-checksum */
     if (rt && rt->port)
         dev = rt->port;
@@ -705,11 +721,13 @@ static int tcp_snat_out_handler(struct dp_vs_proto *proto,
 
     /* leverage HW TX TCP csum offload if possible */
     if (likely(dev && (dev->flag & NETIF_PORT_FLAG_TX_TCP_CSUM_OFFLOAD))) {
+        RTE_LOG(DEBUG, IPVS, "%s checksum of l4 will be calculated by hw\n", __func__);
         mbuf->l4_len = ntohs(ip4_hdr(mbuf)->total_length) - ip4hlen;
         mbuf->l3_len = ip4hlen;
         mbuf->ol_flags |= (PKT_TX_TCP_CKSUM | PKT_TX_IP_CKSUM | PKT_TX_IPV4);
         th->check = rte_ipv4_phdr_cksum(ip4_hdr(mbuf), mbuf->ol_flags);
     } else {
+        RTE_LOG(DEBUG, IPVS, "%s checksum of l4 will be calculated by sw\n", __func__);
         if (mbuf_may_pull(mbuf, mbuf->pkt_len) != 0)
             return EDPVS_INVPKT;
         tcp4_send_csum(ip4_hdr(mbuf), th);
@@ -971,6 +989,12 @@ static void defence_tcp_drop_handler(vector_t tokens)
     g_defence_tcp_drop = 1;
 }
 
+static void remove_ts_option_handler(vector_t tokens)
+{
+    RTE_LOG(INFO, IPVS, "remove_ts_option ON\n");
+    g_remove_ts_option = 1;
+}
+
 static inline void timeout_handler_template(vector_t tokens,
         const char *tcp_state, int idx, int default_timeout)
 {
@@ -1075,6 +1099,7 @@ void tcp_keyword_value_init(void)
 void install_proto_tcp_keywords(void)
 {
     install_keyword("defence_tcp_drop", defence_tcp_drop_handler, KW_TYPE_NORMAL);
+    install_keyword("remove_ts_option", remove_ts_option_handler, KW_TYPE_NORMAL);
     install_keyword("timeout", NULL, KW_TYPE_NORMAL);
     install_sublevel();
     install_keyword("none", timeout_none_handler, KW_TYPE_NORMAL);

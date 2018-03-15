@@ -17,10 +17,14 @@
  */
 #include <assert.h>
 #include <netinet/ip_icmp.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
 #include "common.h"
 #include "ipv4.h"
 #include "icmp.h"
 #include "sa_pool.h"
+#include "netif.h"
+#include "vxlan.h"
 #include "ipvs/ipvs.h"
 #include "ipvs/conn.h"
 #include "ipvs/proto.h"
@@ -32,8 +36,12 @@
 #include "ipvs/synproxy.h"
 #include "ipvs/blklst.h"
 #include "ipvs/proto_udp.h"
+#include "ipvs/proto_tcp.h"
 
 #define icmp4_id(icmph)      (((icmph)->un).echo.id)
+
+extern int g_vxlan_port_inbound;
+extern int g_vxlan_port_outbound;
 
 static inline int dp_vs_fill_iphdr(int af, const struct rte_mbuf *mbuf, 
                                    struct dp_vs_iphdr *iph)
@@ -543,6 +551,7 @@ static int dp_vs_in(void *priv, struct rte_mbuf *mbuf,
     struct dp_vs_conn *conn;
     int dir, af, verdict, err, related;
     bool drop = false;
+    int sched_res;
     eth_type_t etype = mbuf->packet_type; /* FIXME: use other field ? */
     assert(mbuf && state);
 
@@ -597,8 +606,9 @@ static int dp_vs_in(void *priv, struct rte_mbuf *mbuf,
 
     if (unlikely(!conn)) {
         /* try schedule RS and create new connection */
-        if (prot->conn_sched(prot, &iph, mbuf, &conn, &verdict) != EDPVS_OK) {
-            /* RTE_LOG(DEBUG, IPVS, "%s: fail to schedule.\n", __func__); */
+        sched_res = prot->conn_sched(prot, &iph, mbuf, &conn, &verdict);
+        if (sched_res != EDPVS_OK) {
+            RTE_LOG(WARNING, IPVS, "%s: fail to schedule. result=%d\n", __func__, sched_res); 
             return verdict;
         }
 
@@ -676,8 +686,8 @@ static int dp_vs_pre_routing(void *priv, struct rte_mbuf *mbuf,
 
     /* Drop udp packet which send to tcp-vip */
     if (g_defence_udp_drop && IPPROTO_UDP == iph.proto) {
-        if ((svc = dp_vs_lookup_vip(af, IPPROTO_UDP, &iph.daddr)) == NULL) {
-            if ((svc = dp_vs_lookup_vip(af, IPPROTO_TCP, &iph.daddr)) != NULL) {
+        if ((svc = dp_vs_lookup_vip(af, IPPROTO_UDP, &iph.daddr, vx_vni_vip)) == NULL) {
+            if ((svc = dp_vs_lookup_vip(af, IPPROTO_TCP, &iph.daddr, vx_vni_vip)) != NULL) {
                 dp_vs_estats_inc(DEFENCE_UDP_DROP);
                 return INET_DROP;
             }
