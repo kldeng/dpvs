@@ -672,10 +672,20 @@ static int dp_vs_pre_routing(void *priv, struct rte_mbuf *mbuf,
     struct dp_vs_iphdr iph;
     int af;
     struct dp_vs_service *svc;
+    struct dp_vs_vxlan_info *vxi = get_priv(mbuf);
+    struct tcp_hdr *th, _tcph;
+    uint32_t vx_vni_vip = vxi->vx_vni_vip ? vxi->vx_vni_vip : 0;
 
     af = AF_INET;
     if (EDPVS_OK != dp_vs_fill_iphdr(af, mbuf, &iph))
         return INET_ACCEPT;
+
+    /* no need to lookup connection session for BGP packets */
+    if (IPPROTO_TCP == iph.proto) {
+        th = mbuf_header_pointer(mbuf, iph.len, sizeof(_tcph), &_tcph);
+        if (th->src_port == rte_cpu_to_be_16(179) || th->dst_port == rte_cpu_to_be_16(179))
+            return INET_STOP; // skip the following hook function and invoke okfun directly       
+    }
 
     /* Drop all ip fragment except ospf */
     if ((af == AF_INET) && ip4_is_frag(ip4_hdr(mbuf))
