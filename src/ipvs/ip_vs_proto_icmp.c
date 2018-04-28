@@ -25,6 +25,7 @@
 #include "dpdk.h"
 #include "common.h"
 #include "inet.h"
+#include "vxlan.h"
 #include "ipv4.h"
 #include "ipvs/ipvs.h"
 #include "ipvs/proto.h"
@@ -102,34 +103,34 @@ static int icmp_conn_sched(struct dp_vs_proto *proto,
 }
 
 static const uint8_t invmap[] = {
-	[ICMP_ECHO] = ICMP_ECHOREPLY + 1,
-	[ICMP_ECHOREPLY] = ICMP_ECHO + 1,
-	[ICMP_TIMESTAMP] = ICMP_TIMESTAMPREPLY + 1,
-	[ICMP_TIMESTAMPREPLY] = ICMP_TIMESTAMP + 1,
-	[ICMP_INFO_REQUEST] = ICMP_INFO_REPLY + 1,
-	[ICMP_INFO_REPLY] = ICMP_INFO_REQUEST + 1,
-	[ICMP_ADDRESS] = ICMP_ADDRESSREPLY + 1,
-	[ICMP_ADDRESSREPLY] = ICMP_ADDRESS + 1
+    [ICMP_ECHO] = ICMP_ECHOREPLY + 1,
+    [ICMP_ECHOREPLY] = ICMP_ECHO + 1,
+    [ICMP_TIMESTAMP] = ICMP_TIMESTAMPREPLY + 1,
+    [ICMP_TIMESTAMPREPLY] = ICMP_TIMESTAMP + 1,
+    [ICMP_INFO_REQUEST] = ICMP_INFO_REPLY + 1,
+    [ICMP_INFO_REPLY] = ICMP_INFO_REQUEST + 1,
+    [ICMP_ADDRESS] = ICMP_ADDRESSREPLY + 1,
+    [ICMP_ADDRESSREPLY] = ICMP_ADDRESS + 1
 };
 
 static bool icmp_invert_type(uint8_t *type, uint8_t orig)
 {
-	if (orig >= sizeof(invmap) || !invmap[orig])
-		return false;
+    if (orig >= sizeof(invmap) || !invmap[orig])
+        return false;
 
-	*type = invmap[orig] - 1;
-	return true;
+    *type = invmap[orig] - 1;
+    return true;
 }
 
 static bool is_icmp_reply(uint8_t type)
 {
-	if (type == ICMP_ECHOREPLY
-			|| type == ICMP_TIMESTAMPREPLY
-			|| type == ICMP_INFO_REPLY
-			|| type == ICMP_ADDRESSREPLY)
-		return true;
-	else
-		return false;
+    if (type == ICMP_ECHOREPLY
+            || type == ICMP_TIMESTAMPREPLY
+            || type == ICMP_INFO_REPLY
+            || type == ICMP_ADDRESSREPLY)
+        return true;
+    else
+        return false;
 }
 
 static struct dp_vs_conn *icmp_conn_lookup(struct dp_vs_proto *proto,

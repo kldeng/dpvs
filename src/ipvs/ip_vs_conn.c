@@ -756,7 +756,7 @@ struct dp_vs_conn *dp_vs_conn_get(int af, uint16_t proto,
                     && tuphash->dport == sport
                     && inet_addr_equal(af, &tuphash->saddr, daddr)
                     && inet_addr_equal(af, &tuphash->daddr, saddr)
-            && tuphash->vx_vni_vip == vx_vni_vip
+                    && tuphash->vx_vni_vip == vx_vni_vip
                     && tuphash->proto == proto
                     && tuphash->af == af) {
                 /* hit */
@@ -773,7 +773,7 @@ struct dp_vs_conn *dp_vs_conn_get(int af, uint16_t proto,
                     && tuphash->dport == dport
                     && inet_addr_equal(af, &tuphash->saddr, saddr)
                     && inet_addr_equal(af, &tuphash->daddr, daddr)
-            && tuphash->vx_vni_vip == vx_vni_vip
+                    && tuphash->vx_vni_vip == vx_vni_vip
                     && tuphash->proto == proto
                     && tuphash->af == af) {
                 /* hit */
@@ -794,7 +794,7 @@ struct dp_vs_conn *dp_vs_conn_get(int af, uint16_t proto,
             rte_lcore_id(), inet_proto_name(proto),
             inet_ntop(af, saddr, sbuf, sizeof(sbuf)) ? sbuf : "::", ntohs(sport),
             inet_ntop(af, daddr, dbuf, sizeof(dbuf)) ? dbuf : "::", ntohs(dport),
-        vx_vni_vip, vx_vni_rs,
+            vx_vni_vip, vx_vni_rs,
             conn ? "hit" : "miss", reverse ? "reverse" : "");
 #endif
 
