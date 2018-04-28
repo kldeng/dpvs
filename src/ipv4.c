@@ -26,6 +26,8 @@
 #include "neigh.h"
 #include "icmp.h"
 #include "parser/parser.h"
+#include "ipvs/ipvs.h"
+#include "vxlan.h"
 
 #define IPV4
 #define RTE_LOGTYPE_IPV4    RTE_LOGTYPE_USER1
@@ -568,6 +570,7 @@ int ipv4_local_out(struct rte_mbuf *mbuf)
 {
     struct ipv4_hdr *iph = ip4_hdr(mbuf);
     struct route_entry *rt = mbuf->userdata;
+    struct dp_vs_vxlan_info *vxi = get_priv(mbuf);
 
     iph->total_length = htons(mbuf->pkt_len);
 
@@ -576,6 +579,10 @@ int ipv4_local_out(struct rte_mbuf *mbuf)
     } else {
         ip4_send_csum(iph);
     }
+
+    if (vxi->vx_vni_vip)
+        vxlan_encap(mbuf, DPVS_CONN_DIR_OUTBOUND, vxi->vx_vni_vip, 0, vxi->vtep_peer_addr, vxi->smac_inner);
+    
     return INET_HOOK(INET_HOOK_LOCAL_OUT, mbuf, NULL, rt->port, ipv4_output);
 }
 
