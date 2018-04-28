@@ -2709,7 +2709,7 @@ struct netif_port *netif_alloc(size_t priv_size, const char *namefmt,
         //TODO: use random lladdr ?
     }
 
-    if (dev->mtu == 0)
+    if (dev->mtu == 0) 
         dev->mtu = ETH_DATA_LEN;
 
     rte_rwlock_init(&dev->dev_lock);
@@ -2869,6 +2869,9 @@ static struct netif_port* netif_port_alloc(portid_t id, int nrxq,
         port->socket = rte_socket_id();
     port->mbuf_pool = pktmbuf_pool[port->socket]; 
     rte_eth_macaddr_get((uint8_t)id, &port->addr);
+
+    /* TODO: more flexible way to set mtu */
+    rte_eth_dev_set_mtu((uint8_t)id, NETIF_MAX_DATA_LEN);
     rte_eth_dev_get_mtu((uint8_t)id, &port->mtu);
     rte_eth_dev_info_get((uint8_t)id, &port->dev_info);
     port->dev_conf = *conf;
@@ -3478,12 +3481,13 @@ static int relate_bonding_device(void)
 static struct rte_eth_conf default_port_conf = {
     .rxmode = {
         .mq_mode        = ETH_MQ_RX_RSS,
-        .max_rx_pkt_len = ETHER_MAX_LEN,
+        .max_rx_pkt_len = NETIF_MAX_FRAME_LEN,
         .split_hdr_size = 0,
         .header_split   = 0,
         .hw_ip_checksum = 1,
         .hw_vlan_filter = 0,
-        .jumbo_frame    = 0,
+        //.hw_vlan_strip  = 1,    /* < VLAN strip enabled. */
+        .jumbo_frame    = 1,
         .hw_strip_crc   = 0,
     },
     .rx_adv_conf = {
