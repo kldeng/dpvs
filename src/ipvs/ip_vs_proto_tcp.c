@@ -560,7 +560,8 @@ static int tcp_fnat_in_handler(struct dp_vs_proto *proto,
      *    so that RS with TOA module can get real client IP.
      */
     if (th->syn && !th->ack) {
-        tcp_in_remove_ts(th);
+        if (g_remove_ts_option)
+            tcp_in_remove_ts(th);
         tcp_in_init_seq(conn, mbuf, th);
         tcp_in_add_toa(conn, mbuf, th);
     }
