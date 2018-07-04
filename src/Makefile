@@ -23,7 +23,7 @@
 
 TARGET := dpvs
 
-VERSION_STRING := $(shell ./VERSION)
+VERSION_STRING := $(shell git describe --tags --always)
 DATE_STRING := $(shell date +%Y.%m.%d.%H:%M:%S)
 
 # same path of THIS Makefile
